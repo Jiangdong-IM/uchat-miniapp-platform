@@ -1,0 +1,22 @@
+# Frontend
+frontend/node_modules/
+frontend/dist/
+frontend/.env.local
+frontend/.env.*.local
+
+# Java
+backend/target/
+backend/.classpath
+backend/.project
+backend/.settings/
+
+# IDE / OS
+.idea/
+.vscode/
+*.iml
+.DS_Store
+Thumbs.db
+
+# Local logs and temporary files
+*.log
+tmp/

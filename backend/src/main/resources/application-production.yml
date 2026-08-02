@@ -1,0 +1,12 @@
+spring:
+  datasource:
+    url: ${MINIAPP_DB_URL}
+    username: ${MINIAPP_DB_USERNAME}
+    password: ${MINIAPP_DB_PASSWORD}
+    driver-class-name: com.mysql.cj.jdbc.Driver
+  flyway:
+    baseline-on-migrate: true
+    baseline-version: 0
+
+platform:
+  asset-public-base-url: ${MINIAPP_ASSET_PUBLIC_BASE_URL:}
