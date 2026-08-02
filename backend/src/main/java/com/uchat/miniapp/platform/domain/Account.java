@@ -16,6 +16,9 @@ public record Account(
         String reviewNote,
         Long reviewedBy,
         Instant reviewedAt,
+        String banReason,
+        Long bannedBy,
+        Instant bannedAt,
         Instant createdAt,
         Instant updatedAt
 ) {

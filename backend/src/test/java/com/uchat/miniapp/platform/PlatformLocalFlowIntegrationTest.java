@@ -69,6 +69,13 @@ class PlatformLocalFlowIntegrationTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.success").value(true))
                 .andExpect(jsonPath("$.data.status").value("UP"));
+        mvc.perform(post("/miniApp/search")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(json(Map.of("keyword", "演示"))))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.success").value(false))
+                .andExpect(jsonPath("$.code").value(400))
+                .andExpect(jsonPath("$.msg").value("invalid mini app request"));
 
         JsonNode developer = register("developer_one", "one@example.test", "开发者一");
         long developerId = developer.get("id").asLong();
@@ -104,6 +111,14 @@ class PlatformLocalFlowIntegrationTest {
                 .andReturn();
         long versionId = body(versionUpload).at("/data/id").asLong();
 
+        mvc.perform(post("/miniApp/search")
+                        .header("userId", 8001)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(json(Map.of("keyword", "演示"))))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(200))
+                .andExpect(jsonPath("$.data").isEmpty());
+
         mvc.perform(get("/api/admin/versions").param("status", "PENDING_REVIEW")
                         .header("Authorization", bearer(adminToken)))
                 .andExpect(status().isOk())
@@ -117,24 +132,88 @@ class PlatformLocalFlowIntegrationTest {
                 .andExpect(jsonPath("$.data.status").value("APPROVED"));
         assertThat(localGateway.activeAppCount()).isEqualTo(1);
 
+        mvc.perform(post("/miniApp/search")
+                        .header("userId", 8001)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(json(Map.of("keyword", "演示"))))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.success").value(true))
+                .andExpect(jsonPath("$.code").value(200))
+                .andExpect(jsonPath("$.msg").value("success"))
+                .andExpect(jsonPath("$.data[0].appId").value("com.test.demo"))
+                .andExpect(jsonPath("$.data[0].name").value("演示小程序"))
+                .andExpect(jsonPath("$.data[0].version").value("1.0.0"))
+                .andExpect(jsonPath("$.data[0].description").value("本地全流程演示"));
+
+        MvcResult downloadDescriptor = mvc.perform(post("/miniApp/prepareDownload")
+                        .header("userId", 8001)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(json(Map.of("appId", "com.test.demo"))))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.appId").value("com.test.demo"))
+                .andExpect(jsonPath("$.data.version").value("1.0.0"))
+                .andExpect(jsonPath("$.data.archiveSha256").value(
+                        localGateway.activeApp("com.test.demo").activation().archiveSha256()))
+                .andExpect(jsonPath("$.data.archiveSize").value(miniAppZip.length))
+                .andExpect(jsonPath("$.data.updatedAt").isNumber())
+                .andReturn();
+        String downloadUrl = body(downloadDescriptor).at("/data/downloadUrl").asText();
+        assertThat(downloadUrl).startsWith("http://10.0.2.2:8091/local-packages?key=");
+        String packageObjectKey = localGateway.activeApp("com.test.demo").activation().objectKey();
+        mvc.perform(get("/local-packages").param("key", packageObjectKey))
+                .andExpect(status().isOk())
+                .andExpect(result -> assertThat(result.getResponse().getContentAsByteArray())
+                        .containsExactly(miniAppZip));
+
+        String iconObjectKey = withIcon.get("iconObjectKey").asText();
+        assertThat(iconObjectKey).startsWith("assets/com.test.demo/icon/");
+        mvc.perform(get("/oss/object").param("key", iconObjectKey))
+                .andExpect(status().isOk())
+                .andExpect(result -> assertThat(result.getResponse().getContentAsByteArray())
+                        .containsExactly(PNG));
+        mvc.perform(get("/local-packages").param("key", iconObjectKey))
+                .andExpect(status().isNotFound());
+        mvc.perform(get("/oss/object").param("key", packageObjectKey))
+                .andExpect(status().isNotFound());
+        mvc.perform(get("/local-packages").param("key", "../packages/escape.zip"))
+                .andExpect(status().isNotFound());
+
         mvc.perform(get("/api/developer/apps/{id}", appId)
                         .header("Authorization", bearer(developerToken)))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.status").value("PUBLISHED"))
                 .andExpect(jsonPath("$.data.currentVersionId").value(versionId));
 
-        mvc.perform(post("/api/local/feedback")
-                        .header("Authorization", bearer(adminToken))
+        mvc.perform(post("/miniApp/detail")
+                        .header("userId", 8001)
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content(json(Map.of("miniAppId", appId, "uchatUserId", 8001,
-                                "userDisplayName", "本地体验用户", "score", 5,
+                        .content(json(Map.of("appId", "com.test.demo"))))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.developerName").value("开发者一"))
+                .andExpect(jsonPath("$.data.iconObjectKey").value(iconObjectKey))
+                .andExpect(jsonPath("$.data.averageRating").value(0.0))
+                .andExpect(jsonPath("$.data.currentUserRating").doesNotExist())
+                .andExpect(jsonPath("$.data.featuredComments").isEmpty());
+
+        mvc.perform(post("/miniApp/rating")
+                        .header("userId", 8001)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(json(Map.of("appId", "com.test.demo", "score", 4))))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(200))
+                .andExpect(jsonPath("$.data").doesNotExist());
+        mvc.perform(post("/miniApp/comment")
+                        .header("userId", 8001)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(json(Map.of("appId", "com.test.demo",
                                 "content", "交互清楚，运行顺畅"))))
-                .andExpect(status().isOk());
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(200));
 
         MvcResult reviews = mvc.perform(get("/api/developer/apps/{id}/reviews", appId)
                         .header("Authorization", bearer(developerToken)))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.data.averageRating").value(5.0))
+                .andExpect(jsonPath("$.data.averageRating").value(4.0))
                 .andExpect(jsonPath("$.data.ratingCount").value(1))
                 .andExpect(jsonPath("$.data.commentCount").value(1))
                 .andExpect(jsonPath("$.data.comments[0].content").value("交互清楚，运行顺畅"))
@@ -147,14 +226,14 @@ class PlatformLocalFlowIntegrationTest {
         mvc.perform(get("/api/admin/comments")
                         .header("Authorization", bearer(adminToken)))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.data[0].id").value(commentId))
-                .andExpect(jsonPath("$.data[0].appId").value("com.test.demo"))
-                .andExpect(jsonPath("$.data[0].appName").value("演示小程序"))
-                .andExpect(jsonPath("$.data[0].userDisplayName").value("本地体验用户"))
-                .andExpect(jsonPath("$.data[0].content").value("交互清楚，运行顺畅"))
-                .andExpect(jsonPath("$.data[0].featured").value(false))
-                .andExpect(jsonPath("$.data[0].status").value("VISIBLE"))
-                .andExpect(jsonPath("$.data[0].createdAt").isString());
+                .andExpect(jsonPath("$.data.items[0].id").value(commentId))
+                .andExpect(jsonPath("$.data.items[0].appId").value("com.test.demo"))
+                .andExpect(jsonPath("$.data.items[0].appName").value("演示小程序"))
+                .andExpect(jsonPath("$.data.items[0].userDisplayName").value("本地测试用户-8001"))
+                .andExpect(jsonPath("$.data.items[0].content").value("交互清楚，运行顺畅"))
+                .andExpect(jsonPath("$.data.items[0].featured").value(false))
+                .andExpect(jsonPath("$.data.items[0].status").value("VISIBLE"))
+                .andExpect(jsonPath("$.data.items[0].createdAt").isString());
 
         mvc.perform(put("/api/admin/comments/{id}/featured", commentId)
                         .header("Authorization", bearer(adminToken))
@@ -165,12 +244,36 @@ class PlatformLocalFlowIntegrationTest {
         mvc.perform(get("/api/admin/comments")
                         .header("Authorization", bearer(adminToken)))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.data[0].id").value(commentId))
-                .andExpect(jsonPath("$.data[0].featured").value(true));
+                .andExpect(jsonPath("$.data.items[0].id").value(commentId))
+                .andExpect(jsonPath("$.data.items[0].featured").value(true));
         mvc.perform(get("/api/developer/apps/{id}/reviews", appId)
                         .header("Authorization", bearer(developerToken)))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.featuredComments[0].id").value(commentId));
+        mvc.perform(post("/miniApp/detail")
+                        .header("userId", 8001)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(json(Map.of("appId", "com.test.demo"))))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.averageRating").value(4.0))
+                .andExpect(jsonPath("$.data.ratingCount").value(1))
+                .andExpect(jsonPath("$.data.commentCount").value(1))
+                .andExpect(jsonPath("$.data.currentUserRating").value(4))
+                .andExpect(jsonPath("$.data.featuredComments[0].id").value(commentId))
+                .andExpect(jsonPath("$.data.featuredComments[0].displayName")
+                        .value("本地测试用户-8001"))
+                .andExpect(jsonPath("$.data.featuredComments[0].avatarUrl").doesNotExist())
+                .andExpect(jsonPath("$.data.featuredComments[0].createdAt").isString());
+        mvc.perform(post("/miniApp/comments")
+                        .header("userId", 8001)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(json(Map.of("appId", "com.test.demo", "page", 1, "pageSize", 20))))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.page").value(1))
+                .andExpect(jsonPath("$.data.pageSize").value(20))
+                .andExpect(jsonPath("$.data.total").value(1))
+                .andExpect(jsonPath("$.data.items[0].id").value(commentId))
+                .andExpect(jsonPath("$.data.items[0].featured").value(true));
         mvc.perform(put("/api/admin/comments/{id}/featured", commentId)
                         .header("Authorization", bearer(adminToken))
                         .contentType(MediaType.APPLICATION_JSON)
@@ -180,8 +283,8 @@ class PlatformLocalFlowIntegrationTest {
         mvc.perform(get("/api/admin/comments")
                         .header("Authorization", bearer(adminToken)))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.data[0].id").value(commentId))
-                .andExpect(jsonPath("$.data[0].featured").value(false));
+                .andExpect(jsonPath("$.data.items[0].id").value(commentId))
+                .andExpect(jsonPath("$.data.items[0].featured").value(false));
 
         for (int index = 1; index <= 9; index++) {
             createApp(developerToken, "com.test.extra" + index, "应用" + index, "第" + index + "个应用");
@@ -205,6 +308,25 @@ class PlatformLocalFlowIntegrationTest {
         mvc.perform(post("/api/developer/apps/{id}/reviews", appId)
                         .header("Authorization", bearer(developerToken)))
                 .andExpect(status().isMethodNotAllowed());
+
+        mvc.perform(post("/api/developer/apps/{id}/delist", appId)
+                        .header("Authorization", bearer(developerToken)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.status").value("DELISTED"));
+        assertThat(localGateway.activeAppCount()).isZero();
+        mvc.perform(post("/miniApp/search")
+                        .header("userId", 8001)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(json(Map.of("keyword", "演示"))))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data").isEmpty());
+        mvc.perform(post("/miniApp/prepareDownload")
+                        .header("userId", 8001)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(json(Map.of("appId", "com.test.demo"))))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.success").value(false))
+                .andExpect(jsonPath("$.code").value(404));
     }
 
     private JsonNode register(String username, String email, String developerName) throws Exception {

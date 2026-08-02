@@ -28,6 +28,7 @@ import java.util.LinkedHashSet;
 import java.util.Locale;
 import java.util.Objects;
 import java.util.regex.Pattern;
+import java.util.Comparator;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipInputStream;
@@ -59,7 +60,7 @@ public class LocalMemoryReleaseGateway implements MiniAppReleaseGateway {
     private final ObjectMapper objectMapper;
     private final Map<String, StoredObject> objects = new ConcurrentHashMap<>();
     private final Map<String, PackageInspection> inspectedPackages = new ConcurrentHashMap<>();
-    private final Map<String, ActivationRequest> activeCatalog = new ConcurrentHashMap<>();
+    private final Map<String, ActiveMiniApp> activeCatalog = new ConcurrentHashMap<>();
 
     public LocalMemoryReleaseGateway(ObjectMapper objectMapper) {
         this.objectMapper = objectMapper;
@@ -141,7 +142,11 @@ public class LocalMemoryReleaseGateway implements MiniAppReleaseGateway {
                 || request.archiveSize() != inspected.archiveSize()) {
             throw ApiException.badRequest("ACTIVATION_MISMATCH", "激活信息与已验证的小程序包不一致");
         }
-        activeCatalog.put(request.appId(), request);
+        ActivationRequest snapshot = new ActivationRequest(request.appId(), request.name(),
+                request.version(), request.entry(), request.schemaVersion(),
+                List.copyOf(request.permissions()), request.description(), request.objectKey(),
+                request.archiveSha256(), request.archiveSize(), request.publishedBy());
+        activeCatalog.put(request.appId(), new ActiveMiniApp(snapshot, System.currentTimeMillis()));
     }
 
     @Override
@@ -159,6 +164,20 @@ public class LocalMemoryReleaseGateway implements MiniAppReleaseGateway {
 
     public int activeAppCount() {
         return activeCatalog.size();
+    }
+
+    public ActiveMiniApp activeApp(String appId) {
+        return activeCatalog.get(appId);
+    }
+
+    public List<ActiveMiniApp> searchActiveByName(String keyword, int limit) {
+        String normalized = keyword.toLowerCase(Locale.ROOT);
+        return activeCatalog.values().stream()
+                .filter(item -> item.activation().name().toLowerCase(Locale.ROOT).contains(normalized))
+                .sorted(Comparator.comparing((ActiveMiniApp item) -> item.activation().name())
+                        .thenComparing(item -> item.activation().appId()))
+                .limit(limit)
+                .toList();
     }
 
     private ZipInspection inspectZip(byte[] archive) {
@@ -388,6 +407,9 @@ public class LocalMemoryReleaseGateway implements MiniAppReleaseGateway {
     }
 
     public record StoredObject(byte[] bytes, String contentType) {
+    }
+
+    public record ActiveMiniApp(ActivationRequest activation, long updatedAt) {
     }
 
     private record ImageFormat(String contentType, String extension) {

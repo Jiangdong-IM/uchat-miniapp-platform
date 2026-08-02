@@ -45,13 +45,13 @@ public class MiniAppService {
 
     @Transactional
     public MiniAppView create(Account account, AppRequests.Create request) {
-        accounts.lockById(account.id());
+        Account currentAccount = lockApprovedDeveloper(account.id());
         if (apps.countByDeveloper(account.id()) >= 10) {
             throw ApiException.conflict("APP_LIMIT_REACHED", "每个开发者账号最多可创建10个小程序");
         }
         try {
             long id = apps.insert(request.appId().trim(), request.name().trim(),
-                    request.description().trim(), account.id(), account.developerName());
+                    request.description().trim(), currentAccount.id(), currentAccount.developerName());
             return view(requireOwned(id, account.id()));
         } catch (DataIntegrityViolationException exception) {
             throw ApiException.conflict("APP_ID_EXISTS", "该appId已被使用");
@@ -68,8 +68,16 @@ public class MiniAppService {
 
     @Transactional
     public MiniAppView update(long id, Account account, AppRequests.Update request) {
-        requireOwned(id, account.id());
-        apps.updateMetadata(id, account.id(), request.name().trim(), request.description().trim());
+        lockApprovedDeveloper(account.id());
+        MiniApp app = requireOwnedForUpdate(id, account.id());
+        String name = request.name().trim();
+        String description = request.description().trim();
+        if ("PUBLISHED".equals(app.status())
+                && (!app.name().equals(name) || !app.description().equals(description))) {
+            throw ApiException.conflict("APP_MUST_BE_DELISTED_FOR_METADATA_UPDATE",
+                    "已上架小程序必须先下架，才能修改名称或简介");
+        }
+        apps.updateMetadata(id, account.id(), name, description);
         return view(requireOwned(id, account.id()));
     }
 
@@ -78,7 +86,8 @@ public class MiniAppService {
         if (!"icon".equals(kind) && !"cover".equals(kind)) {
             throw ApiException.badRequest("INVALID_ASSET_KIND", "资产类型只能是icon或cover");
         }
-        MiniApp app = requireOwned(id, account.id());
+        lockApprovedDeveloper(account.id());
+        MiniApp app = requireOwnedForUpdate(id, account.id());
         String objectKey = releaseGateway.uploadAsset(app.appId(), kind, file);
         apps.updateAsset(id, account.id(), kind, objectKey);
         return view(requireOwned(id, account.id()));
@@ -86,6 +95,7 @@ public class MiniAppService {
 
     @Transactional
     public VersionView uploadVersion(long id, Account account, MultipartFile file, String releaseNotes) {
+        lockApprovedDeveloper(account.id());
         MiniApp app = apps.findByIdForUpdate(id)
                 .orElseThrow(() -> ApiException.notFound("APP_NOT_FOUND", "小程序不存在"));
         if (app.developerAccountId() != account.id()) {
@@ -124,7 +134,8 @@ public class MiniAppService {
 
     @Transactional
     public MiniAppView delist(long id, Account account) {
-        MiniApp app = requireOwned(id, account.id());
+        lockApprovedDeveloper(account.id());
+        MiniApp app = requireOwnedForUpdate(id, account.id());
         if ("PUBLISHED".equals(app.status())) {
             releaseGateway.deactivate(app.appId());
         }
@@ -161,6 +172,30 @@ public class MiniAppService {
             throw ApiException.forbidden("APP_ACCESS_DENIED", "无权访问此小程序");
         }
         return app;
+    }
+
+    private MiniApp requireOwnedForUpdate(long id, long developerId) {
+        MiniApp app = apps.findByIdForUpdate(id)
+                .orElseThrow(() -> ApiException.notFound("APP_NOT_FOUND", "小程序不存在"));
+        if (app.developerAccountId() != developerId) {
+            throw ApiException.forbidden("APP_ACCESS_DENIED", "无权访问此小程序");
+        }
+        return app;
+    }
+
+    private Account lockApprovedDeveloper(long developerId) {
+        Account account = accounts.findByIdForUpdate(developerId)
+                .orElseThrow(() -> ApiException.unauthorized("INVALID_SESSION", "登录已失效，请重新登录"));
+        if (!"DEVELOPER".equals(account.role())) {
+            throw ApiException.forbidden("DEVELOPER_REQUIRED", "此操作仅限开发者账号");
+        }
+        if ("BANNED".equals(account.status())) {
+            throw ApiException.forbidden("ACCOUNT_BANNED", "开发者账号已被封禁，仅可查看或提交申诉");
+        }
+        if (!"APPROVED".equals(account.status())) {
+            throw ApiException.forbidden("ACCOUNT_DISABLED", "开发者账号当前不可用");
+        }
+        return account;
     }
 
     public MiniAppView view(MiniApp app) {

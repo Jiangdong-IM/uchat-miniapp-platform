@@ -22,6 +22,7 @@ platform:
   session-hours: ${MINIAPP_SESSION_HOURS:24}
   bootstrap-admin-password: ${MINIAPP_BOOTSTRAP_ADMIN_PASSWORD:}
   asset-public-base-url: ${MINIAPP_ASSET_PUBLIC_BASE_URL:}
+  local-app-public-base-url: ${MINIAPP_LOCAL_APP_PUBLIC_BASE_URL:}
 
 integration:
   uchat:

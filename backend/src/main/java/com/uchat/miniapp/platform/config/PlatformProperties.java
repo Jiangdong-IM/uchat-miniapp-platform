@@ -7,7 +7,8 @@ public record PlatformProperties(
         String corsAllowedOrigins,
         int sessionHours,
         String bootstrapAdminPassword,
-        String assetPublicBaseUrl
+        String assetPublicBaseUrl,
+        String localAppPublicBaseUrl
 ) {
     public PlatformProperties {
         if (sessionHours <= 0) {

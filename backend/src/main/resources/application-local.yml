@@ -8,3 +8,4 @@ spring:
 platform:
   cors-allowed-origins: http://localhost:5176,http://127.0.0.1:5176
   asset-public-base-url: /local-assets
+  local-app-public-base-url: ${MINIAPP_LOCAL_APP_PUBLIC_BASE_URL:http://10.0.2.2:8091}

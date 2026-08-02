@@ -23,17 +23,19 @@ export function statusLabel(status) {
     APPROVED: '已通过',
     REJECTED: '已拒绝',
     DISABLED: '已停用',
+    BANNED: '已封禁',
     DRAFT: '草稿',
     PUBLISHED: '已上架',
     DELISTED: '已下架',
     PENDING_REVIEW: '版本审核中',
     VISIBLE: '公开可见',
+    HIDDEN: '已隐藏',
   })[status] || status || '未知'
 }
 
 export function statusTone(status) {
   if (['APPROVED', 'PUBLISHED', 'VISIBLE'].includes(status)) return 'positive'
-  if (['REJECTED', 'DISABLED', 'DELISTED'].includes(status)) return 'negative'
+  if (['REJECTED', 'DISABLED', 'BANNED', 'DELISTED', 'HIDDEN'].includes(status)) return 'negative'
   if (['PENDING', 'PENDING_REVIEW'].includes(status)) return 'warning'
   return 'neutral'
 }

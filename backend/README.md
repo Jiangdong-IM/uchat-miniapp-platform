@@ -1,6 +1,6 @@
 # UChat 小程序管理平台后端
 
-Java 21 + Spring Boot 3.5。后端提供开发者注册审核、小程序资料与资产管理、版本审核发布、下架，以及评分和评论只读查询。
+Java 21 + Spring Boot 3.5。后端提供开发者注册审核、小程序资料与资产管理、版本审核发布、管理员上下架和资料修改、评论治理、开发者封禁与申诉。
 
 ## 本地零中间件启动
 
@@ -29,13 +29,19 @@ $env:MINIAPP_BOOTSTRAP_ADMIN_PASSWORD = "请替换为至少12位的本地密码"
 
 本地前端允许来源默认为 `http://localhost:5176` 和 `http://127.0.0.1:5176`。内存图片通过返回的 `/local-assets/...` 地址直接访问。
 
+Android 模拟器中的 UChat 可使用 local profile 的纯 JSON 小程序接口。默认公开基地址由 `application-local.yml` 配置为 `http://10.0.2.2:8091`，也可以通过 `MINIAPP_LOCAL_APP_PUBLIC_BASE_URL` 显式覆盖；后端使用该配置生成 ZIP 的绝对下载 URL，不从请求 Host 猜测地址。
+
+local profile 额外注册根路径 `/miniApp/search`、`/miniApp/prepareDownload`、`/miniApp/detail`、`/miniApp/comments`、`/miniApp/rating`、`/miniApp/comment`，以及只读对象路由 `/local-packages`、`/oss/object`。这些控制器均标记为 `local`，production 不会注册。调用方必须发送正整数 `userId` 请求头；local 不校验 UChat token，并将评论身份固定显示为 `本地测试用户-{userId}`、头像设为 `null`。此规则只用于本地测试，不能用于生产鉴权。
+
+ZIP 和图片对象使用隔离白名单：`/local-packages` 只读取 `packages/...`，`/oss/object` 只读取 `assets/...`，两类 key 不能交叉访问。Flutter 应把详情中的 `iconObjectKey`、`coverObjectKey` 按现有规则转换成同一 local API 基地址下的 `/oss/object?key=...`。
+
 ## 自动化测试
 
 ```powershell
 .\mvnw.cmd test
 ```
 
-集成测试在 H2 和内存发布网关上完整执行以下流程：待审核账号无法登录、管理员批准、开发者登录、创建小程序、上传图标/封面、上传并校验 ZIP、版本审核发布、内存资产访问、评分评论读取与精选、10 个小程序上限、跨账号越权保护和评分写接口隔离。
+集成测试在 H2 和内存发布网关上完整执行以下流程：待审核账号无法登录、管理员批准、开发者登录、创建小程序、上传和替换图标/封面、上传并校验 ZIP、版本审核发布、管理员搜索和修改资料、内存资产访问、评分与评论 CRUD、10 个小程序上限、跨账号越权保护、封禁批量下架、封禁后登录与权限隔离、版本审批阻断、申诉驳回/通过和手工解禁。
 
 ## 生产环境
 
@@ -56,6 +62,7 @@ UChat 的共享数据库通常已经包含业务表。`production` profile 因�
 | `UCHAT_MINI_APP_INTERNAL_TOKEN` | 内部接口令牌 |
 | `MINIAPP_CORS_ALLOWED_ORIGINS` | 逗号分隔的前端来源 |
 | `MINIAPP_ASSET_PUBLIC_BASE_URL` | 资产公开或签名访问地址前缀；未配置时 URL 字段为 `null` |
+| `MINIAPP_LOCAL_APP_PUBLIC_BASE_URL` | 仅 local 使用的 Android/设备可达公开基地址；默认 `http://10.0.2.2:8091` |
 
 生产发布链路使用固定内部接口和 `X-Mini-App-Internal-Token` 请求头：
 

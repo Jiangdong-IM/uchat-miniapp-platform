@@ -63,7 +63,7 @@ public class AuthService {
         if (!passwordEncoder.matches(request.password(), account.passwordHash())) {
             throw ApiException.unauthorized("INVALID_CREDENTIALS", "用户名或密码错误");
         }
-        if (!"APPROVED".equals(account.status())) {
+        if (!"APPROVED".equals(account.status()) && !"BANNED".equals(account.status())) {
             String code = switch (account.status()) {
                 case "PENDING" -> "ACCOUNT_PENDING";
                 case "REJECTED" -> "ACCOUNT_REJECTED";

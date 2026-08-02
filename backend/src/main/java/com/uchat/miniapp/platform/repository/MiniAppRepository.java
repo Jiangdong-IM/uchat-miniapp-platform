@@ -9,6 +9,7 @@ import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Timestamp;
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 
@@ -45,6 +46,11 @@ public class MiniAppRepository {
         return jdbc.query("SELECT * FROM mini_app WHERE id = ?", MAPPER, id).stream().findFirst();
     }
 
+    public Optional<MiniApp> findByAppId(String appId) {
+        return jdbc.query("SELECT * FROM mini_app WHERE app_id = ?", MAPPER, appId)
+                .stream().findFirst();
+    }
+
     public Optional<MiniApp> findByIdForUpdate(long id) {
         return jdbc.query("SELECT * FROM mini_app WHERE id = ? FOR UPDATE", MAPPER, id)
                 .stream().findFirst();
@@ -64,11 +70,50 @@ public class MiniAppRepository {
                 """, MAPPER, developerId, limit);
     }
 
+    public List<MiniApp> findAdmin(String keyword, String status, int offset, int limit) {
+        Query query = adminQuery(keyword, status, false);
+        query.sql().append(" ORDER BY updated_at DESC, id DESC LIMIT ? OFFSET ?");
+        query.parameters().add(limit);
+        query.parameters().add(offset);
+        return jdbc.query(query.sql().toString(), MAPPER, query.parameters().toArray());
+    }
+
+    public long countAdmin(String keyword, String status) {
+        Query query = adminQuery(keyword, status, true);
+        Long count = jdbc.queryForObject(query.sql().toString(), Long.class,
+                query.parameters().toArray());
+        return count == null ? 0 : count;
+    }
+
+    public List<MiniApp> searchPublished(String keyword, int limit) {
+        String pattern = "%" + keyword.toLowerCase(java.util.Locale.ROOT) + "%";
+        return jdbc.query("""
+                SELECT * FROM mini_app
+                WHERE status = 'PUBLISHED'
+                  AND (LOWER(name) LIKE ? OR LOWER(app_id) LIKE ? OR LOWER(description) LIKE ?)
+                ORDER BY name, app_id LIMIT ?
+                """, MAPPER, pattern, pattern, pattern, limit);
+    }
+
+    public List<MiniApp> findPublishedByDeveloper(long developerId) {
+        return jdbc.query("""
+                SELECT * FROM mini_app
+                WHERE developer_account_id = ? AND status = 'PUBLISHED'
+                ORDER BY id
+                """, MAPPER, developerId);
+    }
+
     public int updateMetadata(long id, long developerId, String name, String description) {
         return jdbc.update("""
                 UPDATE mini_app SET name = ?, description = ?, updated_at = ?
                 WHERE id = ? AND developer_account_id = ?
                 """, name, description, Timestamp.from(Instant.now()), id, developerId);
+    }
+
+    public int updateMetadataAdmin(long id, String name, String description) {
+        return jdbc.update("""
+                UPDATE mini_app SET name = ?, description = ?, updated_at = ? WHERE id = ?
+                """, name, description, Timestamp.from(Instant.now()), id);
     }
 
     public int updateAsset(long id, long developerId, String kind, String objectKey) {
@@ -80,6 +125,16 @@ public class MiniAppRepository {
         return jdbc.update("UPDATE mini_app SET " + column + " = ?, updated_at = ? " +
                         "WHERE id = ? AND developer_account_id = ?",
                 objectKey, Timestamp.from(Instant.now()), id, developerId);
+    }
+
+    public int updateAssetAdmin(long id, String kind, String objectKey) {
+        String column = switch (kind) {
+            case "icon" -> "icon_object_key";
+            case "cover" -> "cover_object_key";
+            default -> throw new IllegalArgumentException("Unsupported asset kind");
+        };
+        return jdbc.update("UPDATE mini_app SET " + column + " = ?, updated_at = ? WHERE id = ?",
+                objectKey, Timestamp.from(Instant.now()), id);
     }
 
     public void activate(long id, long versionId) {
@@ -94,6 +149,19 @@ public class MiniAppRepository {
                 UPDATE mini_app SET status = 'DELISTED', updated_at = ?
                 WHERE id = ? AND developer_account_id = ?
                 """, Timestamp.from(Instant.now()), id, developerId);
+    }
+
+    public void delistAdmin(long id) {
+        jdbc.update("""
+                UPDATE mini_app SET status = 'DELISTED', updated_at = ? WHERE id = ?
+                """, Timestamp.from(Instant.now()), id);
+    }
+
+    public int delistPublishedByDeveloper(long developerId) {
+        return jdbc.update("""
+                UPDATE mini_app SET status = 'DELISTED', updated_at = ?
+                WHERE developer_account_id = ? AND status = 'PUBLISHED'
+                """, Timestamp.from(Instant.now()), developerId);
     }
 
     public ReviewSummary reviewSummary(long miniAppId) {
@@ -113,6 +181,27 @@ public class MiniAppRepository {
                 WHERE developer_account_id = ? AND status = 'PUBLISHED'
                 """, Integer.class, developerId);
         return count == null ? 0 : count;
+    }
+
+    private static Query adminQuery(String keyword, String status, boolean count) {
+        StringBuilder sql = new StringBuilder(count
+                ? "SELECT COUNT(*) FROM mini_app WHERE 1 = 1"
+                : "SELECT * FROM mini_app WHERE 1 = 1");
+        List<Object> parameters = new ArrayList<>();
+        if (keyword != null) {
+            sql.append(" AND (LOWER(app_id) LIKE ? OR LOWER(name) LIKE ? "
+                    + "OR LOWER(description) LIKE ? OR LOWER(developer_name) LIKE ?)");
+            String pattern = "%" + keyword.toLowerCase(java.util.Locale.ROOT) + "%";
+            parameters.add(pattern);
+            parameters.add(pattern);
+            parameters.add(pattern);
+            parameters.add(pattern);
+        }
+        if (status != null) {
+            sql.append(" AND status = ?");
+            parameters.add(status);
+        }
+        return new Query(sql, parameters);
     }
 
     public double averageRatingForDeveloper(long developerId) {
@@ -138,5 +227,8 @@ public class MiniAppRepository {
     }
 
     public record ReviewSummary(java.math.BigDecimal averageRating, int ratingCount, int commentCount) {
+    }
+
+    private record Query(StringBuilder sql, List<Object> parameters) {
     }
 }

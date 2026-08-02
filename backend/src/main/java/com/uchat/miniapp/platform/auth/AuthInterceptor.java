@@ -26,7 +26,7 @@ public class AuthInterceptor implements HandlerInterceptor {
             throw ApiException.unauthorized("AUTH_REQUIRED", "请先登录");
         }
         Account account = authService.authenticate(token);
-        if (!"APPROVED".equals(account.status())) {
+        if (!"APPROVED".equals(account.status()) && !"BANNED".equals(account.status())) {
             throw ApiException.forbidden("ACCOUNT_DISABLED", "账号当前不可用");
         }
         request.setAttribute(AuthContext.ACCOUNT_ATTRIBUTE, account);

@@ -17,6 +17,9 @@ public record AccountView(
         String reviewNote,
         Long reviewedBy,
         Instant reviewedAt,
+        String banReason,
+        Long bannedBy,
+        Instant bannedAt,
         Instant createdAt,
         Instant updatedAt
 ) {
@@ -24,6 +27,7 @@ public record AccountView(
         return new AccountView(account.id(), account.username(), account.role(), account.status(),
                 account.purpose(), account.planDescription(), account.developerName(),
                 account.contactEmail(), account.organizationName(), account.reviewNote(),
-                account.reviewedBy(), account.reviewedAt(), account.createdAt(), account.updatedAt());
+                account.reviewedBy(), account.reviewedAt(), account.banReason(), account.bannedBy(),
+                account.bannedAt(), account.createdAt(), account.updatedAt());
     }
 }

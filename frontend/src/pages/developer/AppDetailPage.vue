@@ -1,5 +1,5 @@
 <script setup>
-import { computed, onMounted, reactive, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { ArrowLeft, FileArchive, Image, Save, Star, UploadCloud } from '@lucide/vue'
 import { api } from '../../api/client.js'
 import StatusBadge from '../../components/common/StatusBadge.vue'
@@ -17,6 +17,9 @@ const detail = ref(props.app)
 const form = reactive({ name: props.app.name || '', description: props.app.description || '' })
 const versionFile = ref(null)
 const releaseNotes = ref('')
+const uploadingAsset = ref('')
+const pendingAssetUrls = reactive({ icon: '', cover: '' })
+const assetPreviewErrors = reactive({ icon: false, cover: false })
 
 const tabs = [
   { id: 'overview', label: '上架资料' },
@@ -60,11 +63,37 @@ function saveMetadata() {
   return guarded(() => api.developer.updateApp(detail.value.id, form), '上架资料已保存。')
 }
 
-function uploadAsset(kind, event) {
+function storedAssetUrl(kind) {
+  return kind === 'icon' ? detail.value.iconUrl : detail.value.coverUrl
+}
+
+function assetPreviewUrl(kind) {
+  return pendingAssetUrls[kind] || storedAssetUrl(kind)
+}
+
+function releasePendingAssetUrl(kind) {
+  const url = pendingAssetUrls[kind]
+  if (url) URL.revokeObjectURL(url)
+  pendingAssetUrls[kind] = ''
+}
+
+async function uploadAsset(kind, event) {
   const file = event.target.files?.[0]
   event.target.value = ''
   if (!file) return
-  guarded(() => api.developer.uploadAsset(detail.value.id, kind, file), `${kind === 'icon' ? '图标' : '封面'}已上传。`)
+  releasePendingAssetUrl(kind)
+  pendingAssetUrls[kind] = URL.createObjectURL(file)
+  assetPreviewErrors[kind] = false
+  uploadingAsset.value = kind
+  try {
+    await guarded(
+      () => api.developer.uploadAsset(detail.value.id, kind, file),
+      (kind === 'icon' ? '图标' : '封面') + '已上传。',
+    )
+  } finally {
+    releasePendingAssetUrl(kind)
+    uploadingAsset.value = ''
+  }
 }
 
 function submitVersion() {
@@ -85,7 +114,18 @@ function delist() {
 }
 
 watch(() => props.app.id, load)
+watch(
+  () => [detail.value.iconUrl, detail.value.coverUrl],
+  () => {
+    assetPreviewErrors.icon = false
+    assetPreviewErrors.cover = false
+  },
+)
 onMounted(() => load().catch((requestError) => { error.value = requestError.message }))
+onBeforeUnmount(() => {
+  releasePendingAssetUrl('icon')
+  releasePendingAssetUrl('cover')
+})
 </script>
 
 <template>
@@ -106,16 +146,59 @@ onMounted(() => load().catch((requestError) => { error.value = requestError.mess
       <section class="work-panel">
         <div class="section-heading section-heading--compact"><div><p class="eyebrow">公开信息</p><h2>名称与简介</h2></div><span class="section-index">B / 01</span></div>
         <form class="form-stack" @submit.prevent="saveMetadata">
-          <label class="field"><span>小程序名称</span><input v-model.trim="form.name" required maxlength="40" /><small>{{ form.name.length }}/40，须与 manifest 一致</small></label>
-          <label class="field"><span>简介</span><textarea v-model.trim="form.description" required maxlength="120" rows="5"></textarea><small>{{ form.description.length }}/120，须与 manifest 一致</small></label>
-          <button class="button button--secondary" type="submit" :disabled="busy"><Save :size="16" /> 保存资料</button>
+          <p v-if="detail.status === 'PUBLISHED'" class="decision-warning">名称和简介已与线上版本绑定。请先下架，再修改资料并提交与新资料匹配的版本审核。</p>
+          <label class="field"><span>小程序名称</span><input v-model.trim="form.name" required maxlength="40" :disabled="detail.status === 'PUBLISHED'" /><small>{{ form.name.length }}/40，须与 manifest 一致</small></label>
+          <label class="field"><span>简介</span><textarea v-model.trim="form.description" required maxlength="120" rows="5" :disabled="detail.status === 'PUBLISHED'"></textarea><small>{{ form.description.length }}/120，须与 manifest 一致</small></label>
+          <button class="button button--secondary" type="submit" :disabled="busy || detail.status === 'PUBLISHED'"><Save :size="16" /> 保存资料</button>
         </form>
       </section>
       <section class="work-panel">
         <div class="section-heading section-heading--compact"><div><p class="eyebrow">视觉素材</p><h2>图标与封面</h2></div><span class="section-index">B / 02</span></div>
         <div class="asset-upload-grid">
-          <label class="asset-uploader"><input type="file" accept="image/png,image/jpeg" :disabled="busy" @change="uploadAsset('icon', $event)" /><span><Image :size="22" /><strong>小程序图标</strong><small>PNG/JPEG，最大 1 MiB</small><em>{{ detail.iconObjectKey ? '重新上传' : '选择图片' }}</em></span></label>
-          <label class="asset-uploader asset-uploader--cover"><input type="file" accept="image/png,image/jpeg" :disabled="busy" @change="uploadAsset('cover', $event)" /><span><Image :size="22" /><strong>详情封面</strong><small>PNG/JPEG，最大 3 MiB</small><em>{{ detail.coverObjectKey ? '重新上传' : '选择图片' }}</em></span></label>
+          <label
+            class="asset-uploader"
+            :class="{ 'asset-uploader--has-preview': assetPreviewUrl('icon') && !assetPreviewErrors.icon }"
+          >
+            <input type="file" accept="image/png,image/jpeg" :disabled="busy" @change="uploadAsset('icon', $event)" />
+            <img
+              v-if="assetPreviewUrl('icon') && !assetPreviewErrors.icon"
+              :key="assetPreviewUrl('icon')"
+              class="asset-uploader__preview asset-uploader__preview--icon"
+              :src="assetPreviewUrl('icon')"
+              :alt="detail.name + ' 小程序图标预览'"
+              @error="assetPreviewErrors.icon = true"
+            />
+            <span class="asset-uploader__content">
+              <span v-if="!assetPreviewUrl('icon') || assetPreviewErrors.icon" class="asset-uploader__placeholder"><Image :size="22" /></span>
+              <strong>小程序图标</strong>
+              <small v-if="assetPreviewErrors.icon" class="asset-uploader__error">预览加载失败，请重新上传</small>
+              <small v-else>PNG/JPEG，最大 1 MiB</small>
+              <em>{{ uploadingAsset === 'icon' ? '上传中…' : detail.iconObjectKey ? '点击更换' : '选择图片' }}</em>
+            </span>
+            <span v-if="detail.iconObjectKey && uploadingAsset !== 'icon'" class="asset-uploader__status">已上传</span>
+          </label>
+          <label
+            class="asset-uploader asset-uploader--cover"
+            :class="{ 'asset-uploader--has-preview': assetPreviewUrl('cover') && !assetPreviewErrors.cover }"
+          >
+            <input type="file" accept="image/png,image/jpeg" :disabled="busy" @change="uploadAsset('cover', $event)" />
+            <img
+              v-if="assetPreviewUrl('cover') && !assetPreviewErrors.cover"
+              :key="assetPreviewUrl('cover')"
+              class="asset-uploader__preview"
+              :src="assetPreviewUrl('cover')"
+              :alt="detail.name + ' 详情封面预览'"
+              @error="assetPreviewErrors.cover = true"
+            />
+            <span class="asset-uploader__content">
+              <span v-if="!assetPreviewUrl('cover') || assetPreviewErrors.cover" class="asset-uploader__placeholder"><Image :size="22" /></span>
+              <strong>详情封面</strong>
+              <small v-if="assetPreviewErrors.cover" class="asset-uploader__error">预览加载失败，请重新上传</small>
+              <small v-else>PNG/JPEG，最大 3 MiB</small>
+              <em>{{ uploadingAsset === 'cover' ? '上传中…' : detail.coverObjectKey ? '点击更换' : '选择图片' }}</em>
+            </span>
+            <span v-if="detail.coverObjectKey && uploadingAsset !== 'cover'" class="asset-uploader__status">已上传</span>
+          </label>
         </div>
       </section>
       <section class="work-panel work-panel--full">
